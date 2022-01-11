@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:java="http://www.mulesoft.org/schema/mule/java" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/java http://www.mulesoft.org/schema/mule/java/current/mule-java.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="308bbc48-c36d-4d69-b65d-911d0803ada7" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="310e2d8c-10e5-40c4-a376-224cec878319" >
+		<db:my-sql-connection host="${mysql.host}" port="${mysql.port}" user="${mysql.user}" password="${mysql.password}" database="${mysql.database}"/>
+	</db:config>
+	<configuration-properties doc:name="Configuration properties" doc:id="581a0093-705e-4443-acaa-9eec0e54bc44" file="config.yaml" />
+	<flow name="GetAllAssetsFromWallet" doc:id="3ff35ad5-d3b2-4be7-9eed-a81f7a75d349" >
+		<http:listener doc:name="GET /cryptoWallet" doc:id="ed61ca66-ecc2-4951-a4b4-efb644967880" config-ref="HTTP_Listener_config" path="/cryptoWallet" allowedMethods="GET"/>
+		<try doc:name="Try" doc:id="c38f9af2-2a0d-44ac-a277-37bac75c32f9" >
+			<db:select doc:name="* FROM cryptocurrency" doc:id="157a6a89-1f7e-415a-88eb-2a1d6ab792f3" config-ref="Database_Config">
+			<non-repeatable-iterable />
+			<reconnect-forever />
+			<db:sql><![CDATA[SELECT * FROM cryptocurrency]]></db:sql>
+		</db:select>
+			<error-handler >
+				<on-error-propagate enableNotifications="false" logException="true" doc:name="On Error Propagate" doc:id="0808e8e4-f95d-4022-a85c-0f0507353a54" type="ANY">
+					<set-payload value='#[payload ++ " - Cannot connect to DataBase"]' doc:name="Set Payload" doc:id="ed9e04c8-a4af-44df-a19c-c52b5cca0362" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+		<ee:transform doc:name="Wrap DB response" doc:id="0a58c744-243a-4d10-9a3f-1ca3861fd2df" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload map ( payload01 , indexOfPayload01 ) -> {
+	cryptocurrency_id: payload01.cryptocurrency_id,
+	quantity: payload01.price,
+	name: payload01.name
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="bbf7b075-5db7-4f22-9b9b-56dad3dc347c" message='#[payload]'/>
+	</flow>
+	<flow name="PutIntoWallet" doc:id="82e52bee-0a15-4996-bd62-facf07941787" >
+		<http:listener doc:name="PUT /cryptoWallet" doc:id="f3e461ee-2ebd-4339-b6fd-9ca3a4dfa7af" config-ref="HTTP_Listener_config" path="/cryptoWallet" allowedMethods="POST"/>
+		<ee:transform doc:name="Set Attributes as Entities" doc:id="a7441a08-64a5-4ddb-8659-33c46ea2ae15" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	price: attributes.queryParams.quantity ,
+	name: attributes.queryParams.name 
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="30ae8779-56fc-4d72-b7f7-b211ee38e8c7" message="#[payload]"/>
+		<try doc:name="Try" doc:id="c11a4995-8997-4fc5-896e-df2fe9996440" >
+			<db:insert doc:name="INTO cryptocurrency" doc:id="0883400c-a882-4636-8b80-15218c397f7f" config-ref="Database_Config">
+			<db:sql><![CDATA[INSERT INTO cryptocurrency(name, price) 
+VALUES(:name, :price)]]></db:sql>
+			<db:input-parameters><![CDATA[#[{
+		name: payload.name,
+		price: payload.price 
+	}]]]></db:input-parameters>
+		</db:insert>
+			<error-handler>
+				<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="57370e53-a2fe-4758-8a44-158c999d1ac5" type="ANY">
+					<set-payload value='#["Cannot Save into DataBase"]' doc:name="Set Payload" doc:id="bd0d8160-31b9-4dcb-bf98-3a708f11aa68" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+		<logger level="INFO" doc:name="Logger" doc:id="ff50a632-5958-4c06-8112-f978dc8509b5" message="#[payload.generatedKeys]"/>
+	</flow>
+	<flow name="CheckAllAssetsValue" doc:id="3a252172-f61c-4fb9-a8da-ad1953b82f8c" >
+		<http:listener doc:name="GET /checkAssetsValue" doc:id="c8a69d16-2276-49e5-8a0a-ea78fb35f3ec" config-ref="HTTP_Listener_config" path=" /checkAssetsValue" allowedMethods="GET"/>
+		<ee:transform doc:name="Initialization of ACC Array" doc:id="a85951e3-2a97-497a-b88a-ed2f88194fec" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="acc" ><![CDATA[%dw 2.0
+output application/java
+---
+[]]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<flow-ref doc:name="GetAllAssetsFromWallet" doc:id="8d70f454-7a33-410c-b9ed-02104cfd17af" name="GetAllAssetsFromWallet" targetValue="#[payload as Array]"/>
+		<foreach doc:name="For Each - iterate on each DB entity" doc:id="9eff8e7e-5391-4498-acc1-2c48b4262b3c" collection="#[payload]">
+			<ee:transform doc:name="Set Vars Quantity" doc:id="29006332-86ba-4b79-a78f-b2b18bb89c88" >
+				<ee:message >
+				</ee:message>
+				<ee:variables >
+					<ee:set-variable variableName="quantity" ><![CDATA[%dw 2.0
+output application/java
+---
+vars.rootMessage.payload[vars.counter-1].quantity]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<ee:transform doc:name="Set Vars Currency" doc:id="bef4278b-9040-4295-ae38-051697d2c404" >
+				<ee:message >
+				</ee:message>
+				<ee:variables >
+					<ee:set-variable variableName="currency" ><![CDATA[%dw 2.0
+output application/java
+---
+
+vars.rootMessage.payload[vars.counter-1].name]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<logger level="INFO" doc:name="vars.currency" doc:id="76bf2b78-c07b-44fd-b2b4-e68ce8ccebc9" message="#[vars.currency]"/>
+			<logger level="INFO" doc:name="vars quantity" doc:id="d2af5f65-3320-4634-ae81-99bf74b8c2ed" message="#[vars.quantity]"/>
+			<http:request method="GET" doc:name="/currentValue with QuerryParams" doc:id="c450a888-3517-4313-b962-042f076756c4" url="http://localhost:8081/currentValue">
+			<http:query-params><![CDATA[#[%dw 2.0
+output application/json
+---
+{
+	"name" : vars.currency,
+	"quantity" : vars.quantity
+}]]]></http:query-params>
+		</http:request>
+			<set-variable value="#[payload]" doc:name="USD Value" doc:id="e09e3f5b-c0f5-4231-ad11-49bb962de744" variableName="USDValue"/>
+			<ee:transform doc:name="Currency with USD Value" doc:id="468fd3fb-c0f9-4f91-8934-8b9dc16ab8fc" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+{
+	"Crypto" : vars.currency,
+	"Quantity" : vars.quantity,
+	"USDValue" : vars.USDValue
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<logger level="INFO" doc:name="Currency with USD Value" doc:id="1f27be4d-db87-4f18-8e1e-828272aa65a4" message='#[vars.USDValue]' />
+			<ee:transform doc:name="Assign Payload to vars.acc[]" doc:id="2098be0f-60f0-42d5-8f74-44bd248dfa61">
+				<ee:message>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="acc" ><![CDATA[%dw 2.0
+output application/java
+---
+
+	vars.acc + payload
+
+]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<logger level="INFO" doc:name="vars.acc[]" doc:id="8d0b8728-e24a-4b1e-a76f-e80c305c7ee9" message="#[vars.acc]"/>
+		</foreach>
+		<ee:transform doc:name="Set payload as vars.acc []" doc:id="17034928-13d3-4af2-a22d-98eb4ce7d522" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+vars.acc]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="final JSON var.acc[]" doc:id="c4e5004a-43f7-4161-9a44-34a86b0b7dc0" message="#[payload]"/>
+		<error-handler>
+			<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="f016ef6f-4025-4249-84d0-425df9c6b518" type="ANY">
+				<set-payload doc:name="Set Payload" doc:id="54e56b54-f05b-4bf7-a2c2-b7e1c5ca3aaa" value="Something gone wrong"/>
+			</on-error-continue>
+		</error-handler>
+	</flow>
+	<flow name="CheckCurrentValue" doc:id="db0ed552-1699-41e2-abbe-a78885daa732">
+		<http:listener doc:name="GET /current Value" doc:id="763d0639-932d-4ce6-8cf9-0ef123a1fcc8" config-ref="HTTP_Listener_config" path="/currentValue" allowedMethods="GET"/>
+		<ee:transform doc:name="Create URL" doc:id="5ca8ce08-f763-4a83-ba37-ced8d318ad61">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+'http://rest.coinapi.io/v1/exchangerate/' ++ attributes.queryParams.name ++ '/USD'
+]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="df8c7e8f-585a-4ec7-9023-c6b2bd546776" message="#[payload]" />
+		<set-variable value="#[attributes.queryParams.quantity]" doc:name="Set Quantity" doc:id="7133cfba-775a-43aa-bf5e-6f5ec586a99e" variableName="quantity" />
+		<set-variable value="#[attributes.queryParams.name]" doc:name="Set Currency" doc:id="fccb072d-b012-4793-ade9-c1ad451b7a92" variableName="currency" />
+		<try doc:name="Try" doc:id="50ebb392-743e-4391-8f22-9e1a7688957b" >
+			<http:request method="GET" doc:name="Request to /coinapi.io " doc:id="859cd4e3-bfae-4ab0-8090-689a47300e9d" outputMimeType="application/json" url="#[payload]">
+			<http:headers><![CDATA[#[output application/java
+---
+{
+	"X-CoinAPI-Key" : "FAE24715-B75A-42B4-96B2-6CE8B19F5C3F"
+}]]]></http:headers>
+		</http:request>
+			<error-handler >
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="cf7b1ba0-aeef-4c8c-8945-4fb329170fb0" type="ANY">
+				<set-payload value="Please provide valid Crypto Currency Code" doc:name="Set Payload" doc:id="6cfcd0c1-da1d-4728-8663-82c095889315" />
+			</on-error-continue>
+			</error-handler>
+		</try>
+		<ee:transform doc:name="Set Exchange Rate" doc:id="b9bb1f53-385b-4afa-bea1-e87929a8ca46">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload.rate]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<ee:transform doc:name="Calculate Value in USD" doc:id="530b2a75-d4ea-4269-b21c-b8a637d22bba">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload * (vars.quantity default 1)]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="e25c19fb-354b-4275-bc57-f04987e70871" message="#[payload]" />
+	</flow>
+</mule>
